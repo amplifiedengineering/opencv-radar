@@ -15,12 +15,13 @@ def CLI():
     Works better with .avi files.
     If no path or name is provided, the camera will be used instead.""")        #instead of using metavar='--path', just type '--path'. For some reason the metavar argument was causing problems
 
-    parser.add_argument('-d','--direction', type=str,default=direction_default,nargs=3,help=f"""A character: H or V
+    parser.add_argument('-d','--direction', type=str, default=direction_default, nargs=3, help=f"""A character: H or V
     representing the orientation of the count line. H is horizontal, V is vertical.
     If not provided, the default is {direction_default[0]},{direction_default[1]}, {direction_default[2]}. The second and third parameters
     are pixels where the start and end measurement is.""")
     parser.add_argument('-l', '--length', type=str, help="""Distance between the measurement lines to ensure
     capturing the speed of the vehicles""")
+    parser.add_argument('--headless', action="store_true", help="""Run without showing the video image""")
     args = parser.parse_args()
     return args
 
@@ -41,11 +42,14 @@ def main(args):
     line_position_start  = int(args.direction[1])
     line_position_end = int(args.direction[2])
     distance = int(args.length)
+    headless = args.headless
+    #print(args.headless)
     tc = TrafficCounter(video_source,
                         line_direction,
                         line_position_start,
                         line_position_end,
-                        distance,)
+                        distance,
+                        headless=headless,)
 
     tc.main_loop()
 

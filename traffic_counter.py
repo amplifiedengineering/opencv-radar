@@ -2,6 +2,7 @@ import numpy as np
 import cv2
 import imutils
 import os
+import progressbar
 from collections import defaultdict
 
 from ultralytics import YOLO
@@ -20,7 +21,8 @@ class TrafficCounter(object):
                  min_area = 200,
                  video_out='',
                  out_video_params={},
-                 starting_frame=10,):
+                 starting_frame=10,
+                 headless=False,):
         self.font              = cv2.FONT_HERSHEY_SIMPLEX
 
         self.counter           = 0
@@ -30,13 +32,15 @@ class TrafficCounter(object):
         self.distance          = distance
         self.starting_frame    = starting_frame
         self.video_source      = cv2.VideoCapture(video_source)    
-
+        self.headless = headless
+        print(headless)
         self.threshold_speed = threshold_speed
         self.frame_count = 0
         self.frame_count_total = 0
         self.any_object_detected_total = 0
         self.track_history = defaultdict(lambda: [])
         self.frame_history = defaultdict(int)
+        self.frame_history_start = defaultdict(int)
         self.frame_history_total = defaultdict(int)
         self.model = YOLO("yolov8n.pt")
 
@@ -95,69 +99,81 @@ class TrafficCounter(object):
 
         cv2.destroyWindow('setup2')
 
+
     def main_loop(self):
+        print(self.headless)
         self._set_up_lines()
         rate_of_influence = 0.01
         FRAME_CROPPED = False
-        while True:
-            #print("in main loop")
-            grabbed,img = self.video_source.read()
-            if not grabbed:
-                break
-            #--------------
-            frame_id = int(self.video_source.get(1))        #get current frame index
-            self.frame_count_total += 1
+        totalFrames = int(self.video_source.get(cv2.CAP_PROP_FRAME_COUNT))
+        with progressbar.ProgressBar(max_value=totalFrames) as bar:
+            while True:
+                #print("in main loop")
+                grabbed,img = self.video_source.read()
+                if not grabbed:
+                    break
+                #--------------
 
-            results = self.model.track(img, persist=True, verbose=False)
 
-            boxes = results[0].boxes.xywh.cpu()
-            # Visualize the results on the frame
-            annotated_frame = results[0].plot()
-            annotated_frame = self._draw_line(annotated_frame, self.line_direction, self.line_position_start)
-            annotated_frame = self._draw_line(annotated_frame, self.line_direction, self.line_position_end)
+                frame_id = int(self.video_source.get(1))        #get current frame index
+                self.frame_count_total += 1
+                bar.update(self.frame_count_total)
 
-            if results[0].boxes.id != None:
-                self.any_object_detected_total += 1
-                track_ids = results[0].boxes.id.tolist()
+                results = self.model.track(img, persist=True, verbose=False, classes=[2, 3, 7])
 
-                # Plot the tracks
-                for box, track_id in zip(boxes, track_ids):
-                    x, y, w, h = box
-                    track = self.track_history[track_id]
-                    self.frame_history_total[track_id] += 1
-                    if self.line_direction.upper() == "H":
-                        if y > self.line_position_start and y < self.line_position_end:
-                            self.frame_history[track_id] += 1
-                    else:
-                        if x > self.line_position_start and x < self.line_position_end:
-                            self.frame_history[track_id] += 1
-                    track.append((float(x), float(y)))  # x, y center point
-                    if len(track) > 30:  # retain 90 tracks for 90 frames
-                        track.pop(0)
+                boxes = results[0].boxes.xywh.cpu()
+                # Visualize the results on the frame
+                annotated_frame = results[0].plot()
+                annotated_frame = self._draw_line(annotated_frame, self.line_direction, self.line_position_start)
+                annotated_frame = self._draw_line(annotated_frame, self.line_direction, self.line_position_end)
 
-                    # Draw the tracking lines
-                    points = np.hstack(track).astype(np.int32).reshape((-1, 1, 2))
-                    cv2.polylines(annotated_frame, [points], isClosed=False, color=(230, 230, 230), thickness=10)
+                if results[0].boxes.id != None:
+                    self.any_object_detected_total += 1
+                    track_ids = results[0].boxes.id.tolist()
 
-            # Display the annotated frame
-            cv2.imshow("YOLOv8 Tracking", annotated_frame)
+                    # Plot the tracks
+                    for box, track_id in zip(boxes, track_ids):
+                        x, y, w, h = box
+                        track = self.track_history[track_id]
+                        if self.frame_history_start[track_id] == 0:
+                            self.frame_history_start[track_id] = frame_id
+                        self.frame_history_total[track_id] += 1
+                        if self.line_direction.upper() == "H":
+                            if y > self.line_position_start and y < self.line_position_end:
+                                self.frame_history[track_id] += 1
+                        else:
+                            if x > self.line_position_start and x < self.line_position_end:
+                                self.frame_history[track_id] += 1
+                        track.append((float(x), float(y)))  # x, y center point
+                        if len(track) > 30:  # retain 90 tracks for 90 frames
+                            track.pop(0)
 
-            ##-------Termination Conditions
-            k = cv2.waitKey(25) & 0xFF
-            if k == 27 or k == ord('q') or k == ord('Q'):
-                break
-            if k == ord(' '):   #if spacebar is pressed
-                paused_key = cv2.waitKey(0) & 0xFF       #program is paused for a while
-                if paused_key == ord(' '):    #pressing space again unpauses the program
-                    pass
+                        # Draw the tracking lines
+                        points = np.hstack(track).astype(np.int32).reshape((-1, 1, 2))
+                        cv2.polylines(annotated_frame, [points], isClosed=False, color=(230, 230, 230), thickness=10)
 
-        for k, v in self.frame_history.items():
-            if v > 0:
-                mphCalc = self.distance / 5280 / (v * 1 / 30 * 1 / 3600) #distance in feet divided by feet per miles, divided by frames counted, divided by FPS (30), divided by 1 / seconds per hour
-                # may need a different FPS calc based upon the video
-                if mphCalc < self.threshold_speed:
-                    print (f"{self.distance} {v}")
-                    print(f"id: {k} speed (mph): {self.distance / 5280 / (v * 1 / 30 * 1 / 3600)} total frames tracked: {self.frame_history_total[k]}")
+                # Display the annotated frame
+                if not self.headless:
+                    cv2.imshow("YOLOv8 Tracking", annotated_frame)
+
+                ##-------Termination Conditions
+                k = cv2.waitKey(25) & 0xFF
+                if k == 27 or k == ord('q') or k == ord('Q'):
+                    break
+                if k == ord(' '):   #if spacebar is pressed
+                    paused_key = cv2.waitKey(0) & 0xFF       #program is paused for a while
+                    if paused_key == ord(' '):    #pressing space again unpauses the program
+                        pass
+
+            for k, v in self.frame_history.items():
+                if v > 0:
+                    mphCalc = self.distance / 5280 / (v * 1 / 30 * 1 / 3600) #distance in feet divided by feet per miles, divided by frames counted, divided by FPS (30), divided by 1 / seconds per hour
+                    # may need a different FPS calc based upon the video
+                    if mphCalc < self.threshold_speed:
+                        print (f"{self.distance} {v}")
+                        print(f"id: {k} speed (mph): {self.distance / 5280 / (v * 1 / 30 * 1 / 3600)} total frames tracked: {self.frame_history_total[k]}")
+                        print(
+                            f"frame start id: {self.frame_history_start[k]}")
 
         print( f"Total detections: {self.any_object_detected_total} Total frame count: {self.frame_count_total} % of time detected: {self.any_object_detected_total / self.frame_count_total}")
 
