@@ -10,7 +10,7 @@ def CLI():
     videoParams_default   = ['mjpg','avi']
     startingFrame_default = 10
 
-    parser = argparse.ArgumentParser(description='Finds the contours on a video file')          #creates a parser object
+    parser = argparse.ArgumentParser(description='Finds car / trucks in a provided video file')          #creates a parser object
     parser.add_argument('-p','--path',type=str,help="""A video filename or path.
     Works better with .avi files.
     If no path or name is provided, the camera will be used instead.""")        #instead of using metavar='--path', just type '--path'. For some reason the metavar argument was causing problems

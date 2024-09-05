@@ -3,6 +3,7 @@ import cv2
 import imutils
 import os
 import progressbar
+import torch
 from collections import defaultdict
 
 from ultralytics import YOLO
@@ -33,7 +34,7 @@ class TrafficCounter(object):
         self.starting_frame    = starting_frame
         self.video_source      = cv2.VideoCapture(video_source)    
         self.headless = headless
-        print(headless)
+
         self.threshold_speed = threshold_speed
         self.frame_count = 0
         self.frame_count_total = 0
@@ -42,6 +43,10 @@ class TrafficCounter(object):
         self.frame_history = defaultdict(int)
         self.frame_history_start = defaultdict(int)
         self.frame_history_total = defaultdict(int)
+
+        if torch.cuda.is_available():
+            torch.cuda.set_device(0)
+
         self.model = YOLO("yolov8n.pt")
 
     def draw_text(self, img, text,
@@ -86,7 +91,6 @@ class TrafficCounter(object):
 
         # Using cv2.putText() method
         img = self.draw_text(img,text="ensure lines are correct, q to finish")
-        print (F"{self.line_direction} {self.line_position_start}")
         img = self._draw_line(img, self.line_direction, self.line_position_start)
         img = self._draw_line(img, self.line_direction, self.line_position_end)
 
